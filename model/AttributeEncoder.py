@@ -2,12 +2,11 @@ import torch
 from itertools import chain
 
 class ConvUnit(torch.nn.Module):
-    def __init__(self, channels):
+    def __init__(self, input_channels, out_channels):
         super(ConvUnit, self).__init__()
-        input_channels, out_channels = channels
         self.conv = torch.nn.Conv2d(input_channels, out_channels, (4, 4), 2, 1)
         self.batch_norm = torch.nn.BatchNorm2d(out_channels)
-        self.relu_op = torch.nn.LeakyReLU()
+        self.relu_op = torch.nn.LeakyReLU(0.1)
 
     def forward(self, input_x):
         conv_out = self.conv(input_x)
@@ -17,12 +16,11 @@ class ConvUnit(torch.nn.Module):
         return output
 
 class ConvTransposeUnit(torch.nn.Module):
-    def __init__(self, channels):
+    def __init__(self, input_channels, out_channels):
         super(ConvTransposeUnit, self).__init__()
-        input_channels, out_channels = channels
         self.conv = torch.nn.ConvTranspose2d(input_channels, out_channels, (4, 4), 2, 1)
         self.batch_norm = torch.nn.BatchNorm2d(out_channels)
-        self.relu_op = torch.nn.LeakyReLU()
+        self.relu_op = torch.nn.LeakyReLU(0.1)
 
     def forward(self, input_x):
         conv_out = self.conv(input_x)
@@ -33,49 +31,53 @@ class ConvTransposeUnit(torch.nn.Module):
 
 class MultiLevelAttEncoder(torch.nn.Module):
     """Please refer Fig 12 https://arxiv.org/pdf/1912.13457.pdf"""
-    def __init__(self, input_channels, output_channels):
+    def __init__(self):
         super(MultiLevelAttEncoder, self).__init__()
-        self.fw_channels_generator = chain(zip(input_channels, output_channels))
-        self.conv_units_fw = [*map(lambda channels: ConvUnit(channels), self.fw_channels_generator)]
 
-        bw_input_channels = input_channels.copy()
-        bw_output_channels = output_channels.copy()
-        bw_input_channels.reverse()
-        bw_output_channels.reverse()
+        self.down_conv_0 = ConvUnit(3, 32)
+        self.down_conv_1 = ConvUnit(32, 64)
+        self.down_conv_2 = ConvUnit(64, 128)
+        self.down_conv_3 = ConvUnit(128, 256)
+        self.down_conv_4 = ConvUnit(256, 512)
+        self.down_conv_5 = ConvUnit(512, 1024)
+        self.down_conv_6 = ConvUnit(1024, 1024)
 
-        self.bw_channels_generator = chain(zip(bw_output_channels[:-1], bw_input_channels[:-1]))
-        self.conv_units_bw = [*map(lambda channels: ConvTransposeUnit(channels), self.bw_channels_generator)]
-
-    def fw_pass(self, input_x):
-        #input_x = X_t [batch_size, 3, 256, 256]
-
-        intermidiate_outputs = []
-        for unit in self.conv_units_fw:
-            out = unit(input_x)
-            intermidiate_outputs += [out]
-            input_x = out
-        return intermidiate_outputs
-
-    def bw_pass(self, intermidiate_outputs):
-
-        z_att_0 = intermidiate_outputs.pop()
-        intermidiate_outputs.reverse()
-
-        att_features = [z_att_0]
-
-        z_att_k = z_att_0
-        for i, unit in enumerate(self.conv_units_bw):
-
-            z_att_k = unit(z_att_k)
-            inter_out_k = intermidiate_outputs[i]
-            att_features += [torch.cat([z_att_k, inter_out_k], dim=1)]
-
-        att_features += [torch.nn.UpsamplingBilinear2d(scale_factor=2)(att_features[-1])]
-
-        return att_features
+        self.up_conv_0 = ConvTransposeUnit(1024, 1024)
+        self.up_conv_1 = ConvTransposeUnit(2048, 512)
+        self.up_conv_2 = ConvTransposeUnit(1024, 256)
+        self.up_conv_3 = ConvTransposeUnit(512, 128)
+        self.up_conv_4 = ConvTransposeUnit(256, 64)
+        self.up_conv_5 = ConvTransposeUnit(128, 32)
 
     def forward(self, input_x):
-        intermidiate_outputs = self.fw_pass(input_x)
-        att_features = self.bw_pass(intermidiate_outputs)
+        x_1_d = self.down_conv_0(input_x)
+        x_2_d = self.down_conv_1(x_1_d)
+        x_3_d = self.down_conv_2(x_2_d)
+        x_4_d = self.down_conv_3(x_3_d)
+        x_5_d = self.down_conv_4(x_4_d)
+        x_6_d = self.down_conv_5(x_5_d)
+        z_1_att = self.down_conv_6(x_6_d)
 
-        return att_features
+        x_1_up = self.up_conv_0(z_1_att)
+
+        z_2_att = torch.cat([x_1_up, x_6_d], dim=1)
+        x_2_up = self.up_conv_1(z_2_att)
+
+        z_3_att = torch.cat([x_2_up, x_5_d], dim=1)
+        x_3_up = self.up_conv_2(z_3_att)
+
+        z_4_att = torch.cat([x_3_up, x_4_d], dim=1)
+        x_4_up = self.up_conv_3(z_4_att)
+
+        z_5_att = torch.cat([x_4_up, x_3_d], dim=1)
+        x_5_up = self.up_conv_4(z_5_att)
+
+        z_6_att = torch.cat([x_5_up, x_2_d], dim=1)
+        x_6_up = self.up_conv_5(z_6_att)
+
+        z_7_att = torch.cat([x_6_up, x_1_d], dim=1)
+
+        z_8_att = torch.nn.UpsamplingBilinear2d(scale_factor=2)(z_7_att)
+
+
+        return z_1_att, z_2_att, z_3_att, z_4_att, z_5_att, z_6_att, z_7_att, z_8_att

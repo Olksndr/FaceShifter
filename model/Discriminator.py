@@ -7,6 +7,24 @@ from SPADE.models.networks import discriminator
 # from SPADE.models.networks import loss
 
 
+class DummyOptions:
+    num_D = 3
+
+    netD_subarch = 'n_layer'
+
+    ndf = 64
+
+    label_nc = 2
+    output_nc = 0
+    contain_dontcare_label = False
+    no_instance = False
+    norm_D = 'spectralinstance'
+    n_layers_D = 4
+
+    no_ganFeat_loss = True
+
+    gan_mode = 'hinge'
+
 def divide_pred(pred):
     # the prediction contains the intermediate outputs of multiscale GAN,
     # so it's usually a list
