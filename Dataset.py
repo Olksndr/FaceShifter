@@ -12,8 +12,11 @@ from mtcnn import MTCNN
 
 from itertools import chain, count
 import numpy as np
+import random
 
+import torch
 from torch.utils.data import Dataset, IterableDataset, DataLoader
+from torchvision import transforms
 
 class S3_operations:
     bucket_name = "faceshifter"
@@ -35,31 +38,35 @@ class S3_operations:
         return img_bytes
 
     def get_page_iterator(self, Prefix, MaxKeys=1000):
-        paginator = client.get_paginator('list_objects_v2')
+        paginator = self.client.get_paginator('list_objects_v2')
         page_iterator = paginator.paginate(Bucket=self.bucket_name, Prefix=Prefix, MaxKeys=1000)
         return page_iterator
 
-class FaceDataset(torch.utils.data.IterableDataset):
+class FaceDataset(IterableDataset):
     num_ffhq = 51096
+    ffhq_name = "00000"
+    
     num_celeb = 29540
 
     min_image_b_size = 12000
 
     same_prob = 0.5
 
-    def __init__(self, s3_op):
+    def __init__(self, s3_op, batch_size):
         super(FaceDataset, self).__init__()
 
         self.s3_op = s3_op
         self.get_vgg_folders()
         self.mtcnn = MTCNN()
-
+    
+        self.batch_size = batch_size
         self.iterables = [self.get_image_generator() for _ in range(batch_size)]
-#         self.transforms = transforms.Compose([
-#                 transforms.ColorJitter(0.2, 0.2, 0.2, 0.01),
-#                 transforms.ToTensor(),
-#                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-#                     ])
+        self.transforms = transforms.Compose([
+                transforms.ToPILImage(),
+                transforms.ColorJitter(0.2, 0.2, 0.2, 0.01),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                    ])
 
     def get_vgg_folders(self):
         with open("vgg_folders_upd.txt", "r") as file:
@@ -75,9 +82,9 @@ class FaceDataset(torch.utils.data.IterableDataset):
     def get_random_ffhq_image(self):
 
         random_ffhq_number = np.random.choice(self.num_ffhq)
-        ffhq_key = "".join([ffhq_name[:-len(str(random_ffhq_number))], str(random_ffhq_number), ".png"])
+        self.ffhq_key = "".join([self.ffhq_name[:-len(str(random_ffhq_number))], str(random_ffhq_number), ".png"])
 
-        img_bytes = self.s3_op.retrieve_object(self, ffhq_key)
+        img_bytes = self.s3_op.retrieve_object("/".join(["ffhq", self.ffhq_key]))
         img_array = self.get_arr_obj(img_bytes)
 
         return img_array
@@ -86,9 +93,9 @@ class FaceDataset(torch.utils.data.IterableDataset):
     def get_random_celeb_image(self):
 
         random_celeb = np.random.choice(self.num_celeb)
-        celeb_key = "".join([str(random_celeb), ".jpg"])
+        self.celeb_key = "".join([str(random_celeb), ".jpg"]) #debug
 
-        img_bytes = self.s3_op.retrieve_object(self, celeb_key)
+        img_bytes = self.s3_op.retrieve_object("/".join(["celeb", self.celeb_key]))
         img_array = self.get_arr_obj(img_bytes)
 
         return img_array
@@ -102,7 +109,7 @@ class FaceDataset(torch.utils.data.IterableDataset):
 
     def get_random_vgg_image(self):
         random_folder = np.random.choice(self.vgg_folders)
-        page_iterator = s3_op.get_page_iterator(Prefix="vgg_raw/{}".format(folder))
+        page_iterator = self.s3_op.get_page_iterator(Prefix="vgg_raw/{}".format(random_folder))
 
         ret_keys = []
         for page in page_iterator:
@@ -119,7 +126,7 @@ class FaceDataset(torch.utils.data.IterableDataset):
         random_vgg_image = np.random.choice(ret_keys)
         vgg_img_key = random_vgg_image.split('/')[-1]
 
-        img_bytes = self.s3_op.retrieve_object(self, vgg_img_key)
+        img_bytes = self.s3_op.retrieve_object(random_vgg_image)
 
         vgg_img_pil = Image.open(img_bytes)
 
@@ -136,19 +143,23 @@ class FaceDataset(torch.utils.data.IterableDataset):
             yield method()
 
     def get_image_generator(self):
-        return chain.from_iterable(map(self.process_data_old, count()))
+        return chain.from_iterable(map(self.process_images, count()))
 
     def get_batch(self, img_generator):
-        ## make outputs  torch tensors
-        ## apply transform!!
+       
         if random.random() > self.same_prob:
-            return([next(img_generator), next(img_generator), 0])
+            return self.transforms(next(img_generator)), self.transforms(next(img_generator)), np.array([0])
+
         else:
-            X_s = next(img_generator)
-            return([X_s, X_s, 1])
+            X_s = self.transforms(next(img_generator))
+
+            return X_s, X_s, np.array([1])
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        return [*map(self.get_batch, self.iterables)]
+        batch = [*map(self.get_batch, self.iterables)]
+        image_1, image_2, same_person = [[batch[i][j] for i in range(self.batch_size)] for j in range(3)]
+
+        return torch.stack(image_1), torch.stack(image_2), torch.from_numpy(np.array(same_person))
