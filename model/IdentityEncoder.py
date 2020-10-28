@@ -8,7 +8,7 @@ class IdentityEncoder():
         self.arcface.eval()
         self.arcface.load_state_dict(torch.load('./InsightFace_Pytorch/model_ir_se50.pth', map_location='cpu'), strict=False)
 
-    def encode(self, X, unsqueeze=True):
+    def encode(self, X):
         with torch.no_grad():
             Z_id = self.arcface(F.interpolate(X, [112, 112], mode='bilinear', align_corners=True))
 
