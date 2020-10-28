@@ -61,12 +61,21 @@ class Trainer():
                     if layer.bias is not None:
                         torch.nn.init.constant_(layer.bias, 0)
 
+     def build_model(self):
+        self.generator = AEINet(self.device)
+        self.discriminator = Discriminator(self.opt).to(self.device)
+
+        self.criterionGAN = losses.loss.GANLoss(self.opt.gan_mode, self.discriminator.FloatTensor, opt=self.opt)
+        
+        self.generator.train()
+        self.discriminator.train()
+        
     def init_optimizers(self):
         self.opt_G = torch.optim.Adam(self.generator.parameters(), lr=4e-4, betas=(0, 0.999))
         self.opt_D = torch.optim.Adam(self.discriminator.parameters(), lr=4e-4, betas=(0, 0.999))
 
-        self.generator.train()
-        self.discriminator.train()
+#         self.generator.train()
+#         self.discriminator.train()
 
     def get_generator_loss(self, pred_fake, Z_att, Z_Y_att, Z_id, Z_Y_id, Y, X_t, same):
 
@@ -83,11 +92,12 @@ class Trainer():
                                                         10 * reconstruction_loss
 
         return loss_G
-
+    
     def get_discriminator_loss(self, pred_real, pred_fake):
         loss_D = 0.5 * (self.criterionGAN(pred_real, True, for_discriminator=True) +\
                        self.criterionGAN(pred_fake, False, for_discriminator=True))
 
+        return loss_D
 
 
     def train_step(self, inputs, step):
@@ -103,23 +113,29 @@ class Trainer():
         pred_fake_g, pred_real_g = self.discriminator(torch.cat([Y, X_s], dim=0))
 
         Z_Y_att = self.generator.att_enc(Y)
+
         Z_Y_id = self.generator.identity_encoder.encode(Y, unsqueeze=False)
 
-        # generator loss
         loss_G = self.get_generator_loss(pred_fake_g, Z_att, Z_Y_att, Z_id, Z_Y_id, Y, X_t, same)
 
         loss_G.backward()
+
         self.opt_G.step()
 
         # discriminator
         self.opt_D.zero_grad()
-        pred_fake_d, pred_real_d = D(torch.cat([Y.detach(), X_s], dim=0))
+
+        pred_fake_d, pred_real_d = self.discriminator(torch.cat([Y.detach(), X_s], dim=0))
+
+        loss_D = self.get_discriminator_loss(pred_real_d, pred_fake_d)
+
         # discriminator loss
-        loss_D = self.get_discriminator_loss()
 
         loss_D.backward()
-        opt_D.step()
-
+        self.opt_D.step()
+        
+        return Y, loss_G, loss_D
+    
     def test_step(self, inputs, step):
         self.generator.eval()
         self.discriminator.eval()
@@ -139,7 +155,6 @@ class Trainer():
 
         self.generator.train()
         self.discriminator.train()
-
 
     def train_mockup():
 #         for step, batch in enumerate(self.train_loader):

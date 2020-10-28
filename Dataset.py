@@ -48,11 +48,11 @@ class FaceDataset(IterableDataset):
 
     same_prob = 0.8
 
-    def __init__(self, s3_op, batch_size):
+    def __init__(self, s3_op, batch_size, keys_file):
         super(FaceDataset, self).__init__()
         self.batch_size = batch_size
         self.s3_op = s3_op
-        self.get_keys()
+        self.get_keys(keys_file)
         self.random_keys_generator = self.get_random_key_generator()
         self.mtcnn = MTCNN()
 
@@ -71,9 +71,9 @@ class FaceDataset(IterableDataset):
 
         return faces
 
-    def get_keys(self):
+    def get_keys(self, keys_file):
         self.keys = []
-        with open("meta/test_keys.csv", "r") as f:
+        with open(keys_file, "r") as f:
             reader = csv.reader(f)
             for line in reader:
                 self.keys.append(line)
