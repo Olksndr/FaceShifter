@@ -25,10 +25,11 @@ def init_weights(module):
 class Trainer():
     opt = DummyOptions()
 
-    def __init__(self, resume=False):
+    def __init__(self, resume=False, batch_size=2):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.build_model()
         self.init_optimizers()
+        self.init_datasets(batch_size)
         self.writer = SummaryWriter("summary/")
         if resume == False:
             model.generator.apply(init_weights)
@@ -36,6 +37,14 @@ class Trainer():
             self.step = 0
         else:
             self.load_model_from_checkpoint()
+
+    def init_datasets(self, batch_size):
+        test_keys, train_keys = [os.path.join("meta", file) for file in os.listdir('meta/')[1:]]
+
+        s3_op = S3_operations()
+
+        train_loader = FaceDataset(s3_op, batch_size=batch_size, keys_file=train_keys)
+        test_loader = FaceDataset(s3_op, batch_size=batch_size, keys_file=test_keys)
 
 
     def build_model(self):
@@ -206,5 +215,5 @@ class Trainer():
 
                 self.generator.train()
                 self.discriminator.train()
-                
+
             self.step += 1
