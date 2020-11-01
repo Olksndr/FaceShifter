@@ -18,6 +18,10 @@ from torch.utils.tensorboard import SummaryWriter
 import torchvision
 from Dataset import S3_operations, FaceDataset
 
+from InsightFace_Pytorch.model import Backbone, Arcface, MobileFaceNet, Am_softmax, l2_norm
+import torch.nn.functional as F
+import torch
+
 import numpy as np
 
 def init_weights(module):
@@ -37,21 +41,30 @@ class Trainer():
         self.batch_size = batch_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.resume = resume
-        
+
         self.build_model()
         self.init_optimizers()
-        
+        self.build_face_recognizer()
         if self.resume == False:
             self.generator.apply(init_weights)
             self.discriminator.apply(init_weights)
             self.step = 0
         else:
             self.load_checkpoint()
-        
+
         self.init_datasets(batch_size)
         self.writer = SummaryWriter("summary/")
-        
-        
+
+    def build_face_recognizer(self):
+        self.arcface = Backbone(50, 0, 'ir_se').to(self.device)
+        self.arcface.eval()
+        self.arcface.load_state_dict(torch.load('./InsightFace_Pytorch/model_ir_se50.pth', map_location='cpu'), strict=False)
+
+    def encode_identity(self, X):
+        with torch.no_grad():
+            Z_id = self.arcface(F.interpolate(X, [112, 112], mode='bilinear', align_corners=True))
+
+        return Z_id.unsqueeze(-1).unsqueeze(-1)
 
     def init_datasets(self, batch_size):
         test_keys, train_keys = [os.path.join("meta", file) for file in os.listdir('meta/')[1:]]
@@ -97,33 +110,33 @@ class Trainer():
     def load_checkpoint(self):
         latest_ckpt_path = sorted(os.listdir("weights"),
                 key=lambda x: int(os.path.splitext(x)[0].split("_")[-1]))[-1]
-        
+
         print("loading :{}".format(latest_ckpt_path))
         torch.cuda.empty_cache()
         ckpt = torch.load(os.path.join("weights", latest_ckpt_path))
-        
+
 #         self.generator = self.generator.to(self.device)
 #         self.discriminator = self.discriminator.to(self.device)
-        
+
         self.step = ckpt['step']
         self.step_test = ckpt['test_step']
         self.generator.load_state_dict(ckpt['generator_state_dict'])
         self.discriminator.load_state_dict(ckpt['discriminator_state_dict'])
         self.opt_G.load_state_dict(ckpt['generator_opt_state_dict'])
         self.opt_D.load_state_dict(ckpt['discriminator_opt_state_dict'])
-        
-        
+
+
         self.generator.to(self.device)
         self.generator.identity_encoder.arcface.to(self.device)
         self.discriminator.to(self.device)
-        
-        
+
+
     def perform_visualization(self, images, test=False):
 #         img = torchvision.utils.make_grid(images)
 #         np_img = np.clip(img.permute(1,2,0).cpu().numpy(), 0, 1)
-        
+
 #         X_s, X_t, same = next(test_dataset)
-    
+
 #         batch_size = 2
 
         def smart_stack(X_s, X_t, Y):
@@ -196,7 +209,9 @@ class Trainer():
         same = same.to(self.device)
         # generator
         self.opt_G.zero_grad()
-        Y, Z_att, Z_id = self.generator([X_s, X_t])
+
+        Z_id = self.encode_identity(X_s)
+        Y, Z_att, Z_id = self.generator([Z_id, X_t])
 
         pred_fake_g, pred_real_g = self.discriminator(torch.cat([Y, X_s], dim=0))
 
@@ -236,8 +251,8 @@ class Trainer():
         same = same.to(self.device)
 
         with torch.no_grad():
-
-            Y, Z_att, Z_id = self.generator([X_s, X_t])
+            Z_id = self.encode_identity(X_s)
+            Y, Z_att, Z_id = self.generator([Z_id, X_t])
 
             pred_fake_g, pred_real_g = self.discriminator(torch.cat([Y, X_s], dim=0))
 
@@ -269,12 +284,12 @@ class Trainer():
             images = [train_batch[0].to(self.device), train_batch[1].to(self.device), Y.detach()]
             if self.step % 100 == 0 and self.step != 0:
                 self.perform_visualization(images)
-            
+
 
             if self.step % 1000 == 0 and self.step != 0:
-                
+
                 del train_batch
-                
+
                 for i in range(100):
                     start_time = time.time()
                     test_batch = next(self.test_loader)
@@ -284,14 +299,14 @@ class Trainer():
                         images = [test_batch[0].to(self.device), test_batch[1].to(self.device), Y]
                         self.perform_visualization(images, test=True)
                     self.step_test += 1
-                self.save_checkpoint()    
+                self.save_checkpoint()
             self.step += 1
         """
             if self.step % 100 == 0 and self.step != 0:
                 images = torch.cat([train_batch[0].to(self.device), train_batch[1].to(self.device), Y])
 #                self.perform_visualization(images,)
-        
-                
+
+
 #                 self.generator.eval()
 #                 self.discriminator.eval()
 
@@ -303,7 +318,7 @@ class Trainer():
 
 #                 self.generator.train()
 #                 self.discriminator.train()
-                
+
                 self.save_checkpoint()
              """
 #            self.step += 1

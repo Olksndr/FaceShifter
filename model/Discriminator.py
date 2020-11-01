@@ -19,7 +19,7 @@ class DummyOptions:
     contain_dontcare_label = False
     no_instance = False
     norm_D = 'spectralinstance'
-    n_layers_D = 4
+    n_layers_D = 6
 
     no_ganFeat_loss = True
 
