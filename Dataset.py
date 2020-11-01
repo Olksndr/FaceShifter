@@ -60,7 +60,7 @@ class FaceDataset(IterableDataset):
         self.iterables = [self.get_image_generator() for _ in range(batch_size)]
 
         self.transforms = transforms.Compose([
-                transforms.ColorJitter(0.2, 0.2, 0.2, 0.01),
+#                transforms.ColorJitter(0.2, 0.2, 0.2, 0.01),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
                     ])
