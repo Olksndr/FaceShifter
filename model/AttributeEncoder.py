@@ -4,7 +4,8 @@ from itertools import chain
 class ConvUnit(torch.nn.Module):
     def __init__(self, input_channels, out_channels):
         super(ConvUnit, self).__init__()
-        self.conv = torch.nn.Conv2d(input_channels, out_channels, (4, 4), 2, 1)
+        self.conv = torch.nn.Conv2d(input_channels, out_channels, (4, 4), 2, 1,
+                                        bias=False)
         self.batch_norm = torch.nn.BatchNorm2d(out_channels)
         self.relu_op = torch.nn.LeakyReLU(0.1)
 
@@ -18,7 +19,8 @@ class ConvUnit(torch.nn.Module):
 class ConvTransposeUnit(torch.nn.Module):
     def __init__(self, input_channels, out_channels):
         super(ConvTransposeUnit, self).__init__()
-        self.conv = torch.nn.ConvTranspose2d(input_channels, out_channels, (4, 4), 2, 1)
+        self.conv = torch.nn.ConvTranspose2d(input_channels, out_channels,
+                                                    (4, 4), 2, 1, bias=False)
         self.batch_norm = torch.nn.BatchNorm2d(out_channels)
         self.relu_op = torch.nn.LeakyReLU(0.1)
 

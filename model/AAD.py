@@ -8,7 +8,7 @@ class AADUnit(torch.nn.Module):
         z_id_input_ch, z_att_input_ch = z_input_channels
         self.batch_norm = torch.nn.BatchNorm2d(output_channels)
         #adaptation mask M
-        self.conv_mask = torch.nn.Conv2d(h_input_channels, output_channels,
+        self.conv_mask = torch.nn.Conv2d(h_input_channels, 1,
             kernel_size, stride=stride,
                 padding=padding)
 
@@ -59,8 +59,9 @@ class DefaultResBLK(torch.nn.Module):
                 z_input_channels=z_input_channels,
                 output_channels=input_channels
                        )
-        self.conv = torch.nn.Conv2d(input_channels, output_channels, [3, 3], 1, 1)
-        self.relu_op = torch.nn.ReLU()
+        self.conv = torch.nn.Conv2d(input_channels, output_channels,
+                                    [3, 3], 1, 1, bias=False)
+        self.relu_op = torch.nn.ReLU(inplace=True)
     def forward(self, inputs):
         hidden, z_identity, z_attributes = inputs
         hidden = self.AAD([hidden, z_identity, z_attributes])
