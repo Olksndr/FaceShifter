@@ -15,8 +15,7 @@ class AEINet(torch.nn.Module):
     def forward(self, inputs):
         Z_id, X_t = inputs
 
-#         Z_id = self.identity_encoder.encode(X_s)
         Z_att = self.att_enc(X_t)
         Y = self.aad_generator([Z_att, Z_id])
 
-        return Y, Z_att, Z_id
+        return Y, Z_att

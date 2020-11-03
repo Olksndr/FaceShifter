@@ -1,58 +1,74 @@
-# from model import losses
-import sys
-sys.path.append('SPADE/')
-
+import numpy as np
 import torch
-from SPADE.models.networks import discriminator
-# from SPADE.models.networks import loss
+from torch import nn
 
+class NLayerDiscriminator(nn.Module):
+    def __init__(self, input_nc=3, ndf=64, n_layers=3, norm_layer=nn.BatchNorm2d, use_sigmoid=False, getIntermFeat=False):
+        super(NLayerDiscriminator, self).__init__()
+        self.getIntermFeat = getIntermFeat
+        self.n_layers = n_layers
 
-class DummyOptions:
-    num_D = 3
+        kw = 4
+        padw = int(np.ceil((kw-1.0)/2))
+        sequence = [[nn.Conv2d(input_nc, ndf, kernel_size=kw, stride=2, padding=padw), nn.LeakyReLU(0.2, True)]]
 
-    netD_subarch = 'n_layer'
+        nf = ndf
+        for n in range(1, n_layers):
+            nf_prev = nf
+            nf = min(nf * 2, 512)
+            sequence += [[
+                nn.Conv2d(nf_prev, nf, kernel_size=kw, stride=2, padding=padw),
+                norm_layer(nf), nn.LeakyReLU(0.2, True)
+            ]]
 
-    ndf = 64
+        nf_prev = nf
+        nf = min(nf * 2, 512)
+        sequence += [[
+            nn.Conv2d(nf_prev, nf, kernel_size=kw, stride=1, padding=padw),
+            norm_layer(nf),
+            nn.LeakyReLU(0.2, True)
+        ]]
 
-    label_nc = 2
-    output_nc = 0
-    contain_dontcare_label = False
-    no_instance = False
-    norm_D = 'spectralinstance'
-    n_layers_D = 6
+        sequence += [[nn.Conv2d(nf, 1, kernel_size=kw, stride=1, padding=padw)]]
 
-    no_ganFeat_loss = True
+        if use_sigmoid:
+            sequence += [[nn.Sigmoid()]]
 
-    gan_mode = 'hinge'
+        if getIntermFeat:
+            for n in range(len(sequence)):
+                setattr(self, 'model'+str(n), nn.Sequential(*sequence[n]))
+        else:
+            sequence_stream = []
+            for n in range(len(sequence)):
+                sequence_stream += sequence[n]
+            self.model = nn.Sequential(*sequence_stream)
 
-def divide_pred(pred):
-    # the prediction contains the intermediate outputs of multiscale GAN,
-    # so it's usually a list
-    if type(pred) == list:
-        fake = []
-        real = []
-        for p in pred:
-            fake.append([tensor[:tensor.size(0) // 2] for tensor in p])
-            real.append([tensor[tensor.size(0) // 2:] for tensor in p])
-    else:
-        fake = pred[:pred.size(0) // 2]
-        real = pred[pred.size(0) // 2:]
+    def forward(self, input):
+        if self.getIntermFeat:
+            res = [input]
+            for n in range(self.n_layers+2):
+                model = getattr(self, 'model'+str(n))
+                res.append(model(res[-1]))
+            return res[1:]
+        else:
+            return self.model(input)
 
-    return fake, real
+class MultiscaleDiscriminator(nn.Module):
+    def __init__(self):
+        super(MultiscaleDiscriminator, self).__init__()
+        self.downsample = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
 
-class Discriminator(torch.nn.Module):
-    def __init__(self, opt):
-        super(Discriminator, self).__init__()
-
-        self.FloatTensor = torch.cuda.FloatTensor if torch.cuda.is_available() \
-            else torch.FloatTensor
-
-        self.MultiscaleDiscrimnator = discriminator.MultiscaleDiscriminator(opt)
+        self.scale_0_layer = NLayerDiscriminator()
+        self.scale_1_layer = NLayerDiscriminator()
+        self.scale_2_layer = NLayerDiscriminator()
 
     def forward(self, inputs):
-        # discriminator_input = torch.cat([Y, X_s], dim=0)
-        D_i = self.MultiscaleDiscrimnator(inputs)
 
-        pred_fake, pred_real = divide_pred(D_i)
+        scale_1_input = self.downsample(inputs)
+        scale_2_input = self.downsample(scale_1_input)
 
-        return pred_fake, pred_real
+        layer_0_out = self.scale_0_layer(inputs)
+        layer_1_out = self.scale_1_layer(scale_1_input)
+        layer_2_out = self.scale_2_layer(scale_2_input)
+
+        return [layer_0_out, layer_1_out, layer_2_out]
