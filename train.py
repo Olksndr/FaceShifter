@@ -1,11 +1,15 @@
 import os
+import sys
 import time
 import torch
 
 from tqdm import tqdm
 from model.Generator import AEINet
-from model.Discriminator import Discriminator
+from model.Discriminator import MultiscaleDiscriminator
 from model.losses import get_generator_loss, get_discriminator_loss
+
+sys.path.append('InsightFace_Pytorch/')
+from mtcnn import MTCNN
 from Dataset import FaceDataset
 from InsightFace_Pytorch.model import Backbone
 
@@ -16,7 +20,6 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 
 class Trainer():
-    opt = DummyOptions()
 
     def __init__(self, resume=False, batch_size=2):
         self.batch_size = batch_size
@@ -39,7 +42,7 @@ class Trainer():
                 self.opt_g, self.opt_d = load_checkpoint(self.generator,\
                                     self.discriminator, self.opt_g, self.opt_d)
 
-        self.init_datasets(batch_size)
+        self.init_datasets()
         self.writer = SummaryWriter("summary/")
 
     def build_face_aligner(self):
@@ -59,20 +62,18 @@ class Trainer():
         return Z_id.unsqueeze(-1).unsqueeze(-1)
 
     def init_datasets(self):
-        test_keys, train_keys = [os.path.join("meta", file) for file in\
-                                    os.listdir('meta/')[1:]]
-
-        self.train_loader = FaceDataset(self.mtccn, batch_size=self.batch_size,
+        train_keys, test_keys = os.path.join("meta", "train_keys.json"), os.path.join("meta", "test_keys.json")
+        self.train_loader = FaceDataset(self.mtcnn, batch_size=self.batch_size,
                                                 keys_file=train_keys)
-        self.test_loader = FaceDataset(batch_size=self.batch_size,
+        self.test_loader = FaceDataset(self.mtcnn, batch_size=self.batch_size,
                                                 keys_file=test_keys)
         self.test_loader.same_prob = 0
         print("datasets successfully init")
 
     def build_model(self):
 
-        self.generator = AEINet(self.device)
-        self.discriminator = Discriminator(self.opt).to(self.device)
+        self.generator = AEINet().to(self.device)
+        self.discriminator = MultiscaleDiscriminator().to(self.device)
 
         print("model successfully built")
 
@@ -83,6 +84,12 @@ class Trainer():
                                                             betas=(0, 0.999))
 
     def train_step(self, inputs, step):
+        X_s, X_t, same = inputs
+
+        X_s = X_s.to(self.device)
+        X_t = X_t.to(self.device)
+        same = same.to(self.device)
+
         Z_id = encode_identity(X_S)
         Y, Z_att = generator([Z_id, X_T])
 
@@ -169,3 +176,6 @@ class Trainer():
                 save_checkpoint(self.step, self.step_test, self.generator,
                                     self.opt_g, self.discriminator, self.opt_d)
             self.step += 1
+
+# if __name__ == "__main__":
+trainer = Trainer(resume=False, batch_size=8)

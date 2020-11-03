@@ -2,6 +2,7 @@ import torch
 import os
 import torchvision
 import numpy as np
+
 def save_checkpoint(step, step_test, generator, opt_g, discriminator, opt_d, ckpt_to_keep=10):
     if len(os.listdir("weights")) > ckpt_to_keep:
         ckpt_files = sorted(os.listdir("weights"),

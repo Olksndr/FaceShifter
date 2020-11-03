@@ -3,3 +3,4 @@ __pycache__/
 *.pth
 SPADE/datasets/
 aws_cred.json
+dev_notebooks/
