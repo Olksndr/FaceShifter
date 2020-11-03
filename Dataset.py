@@ -19,64 +19,49 @@ import torch
 from torch.utils.data import Dataset, IterableDataset, DataLoader
 from torchvision import transforms
 
+# mtcnn = MTCNN()
 
-class S3_operations:
-    bucket_name = "faceshifter"
-    def __init__(self):
-        self.get_client()
+# def align_and_crop(pil_img):
+#     faces = mtcnn.align_multi(pil_img, min_face_size=64, crop_size=(256, 256))
+#     if not faces or len(faces) > 1:
+#         return False
 
-    def get_client(self):
-        self._get_s3_creds()
-        self.client = boto3.client("s3", aws_access_key_id=self.creds["AWSAccessKeyId"],
-                                   aws_secret_access_key=self.creds["AWSSecretKey"])
-
-    def _get_s3_creds(self):
-        with open("meta/aws_cred.json", "r") as file:
-            self.creds = json.load(file)
-
-    def retrieve_object(self, key):
-        img_bytes = io.BytesIO()
-        self.client.download_fileobj(self.bucket_name, key, img_bytes)
-        return img_bytes
-
-    def get_page_iterator(self, Prefix, MaxKeys=1000):
-        paginator = self.client.get_paginator('list_objects_v2')
-        page_iterator = paginator.paginate(Bucket=self.bucket_name, Prefix=Prefix, MaxKeys=1000)
-        return page_iterator
+#     return faces
 
 class FaceDataset(IterableDataset):
 
     same_prob = 0.8
-
-    def __init__(self, s3_op, batch_size, keys_file):
+    
+    def __init__(self, batch_size, keys_file="meta/test_keys.csv"):
         super(FaceDataset, self).__init__()
         self.batch_size = batch_size
-        self.s3_op = s3_op
+        self._get_s3_creds()        
         self.get_keys(keys_file)
         self.random_keys_generator = self.get_random_key_generator()
-        self.mtcnn = MTCNN()
 
 
         self.iterables = [self.get_image_generator() for _ in range(batch_size)]
 
         self.transforms = transforms.Compose([
-#                transforms.ColorJitter(0.2, 0.2, 0.2, 0.01),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
                     ])
-    def align_and_crop(self, pil_img):
-        faces = self.mtcnn.align_multi(pil_img, min_face_size=64, crop_size=(256, 256))
-        if not faces or len(faces) > 1:
-            return False
-
-        return faces
-
+        
+    def _get_s3_creds(self):
+        with open("meta/aws_cred.json", "r") as file:
+            self.creds = json.load(file)
+        self.bucket_name = 'faceshifter'
+    
+    def get_s3_client(self):
+        return boto3.client("s3", aws_access_key_id=self.creds["AWSAccessKeyId"],
+                                   aws_secret_access_key=self.creds["AWSSecretKey"])
+    
     def get_keys(self, keys_file):
         self.keys = []
         with open(keys_file, "r") as f:
             reader = csv.reader(f)
             for line in reader:
-                self.keys.append(line)
+                self.keys.extend(line)
                 
         self._keys_len = len(self.keys)
 
@@ -86,14 +71,15 @@ class FaceDataset(IterableDataset):
             yield self.keys[idx]
 
     def process_image(self, _):
-        random_key = next(self.random_keys_generator)[0]
-        img_bytes = self.s3_op.retrieve_object(random_key)
+        random_key = next(self.random_keys_generator)#[0]
+        print(random_key)
+         
         image = Image.open(img_bytes)
-        result = self.align_and_crop(image)
-        if (not result) or len(result) > 1:
-            return self.process_image(None)
+        image = align_and_crop(image)
 
-        return result
+        if (not image) or len(image) > 1:
+            return self.process_image(None)
+        return image 
 
     def get_image_generator(self):
         return chain.from_iterable(map(self.process_image, count()))
@@ -102,7 +88,6 @@ class FaceDataset(IterableDataset):
 
         if random.random() > self.same_prob:
             return self.transforms(next(img_generator)), self.transforms(next(img_generator)), np.array([0])
-
         else:
             X_s = self.transforms(next(img_generator))
             return X_s, X_s, np.array([1])
@@ -115,4 +100,4 @@ class FaceDataset(IterableDataset):
         
         image_1, image_2, same_person = [[batch[i][j] for i in range(self.batch_size)] for j in range(3)]
 
-        return torch.stack(image_1), torch.stack(image_2), torch.from_numpy(np.array(same_person))
+        return torch.stack(image_1), torch.stack(image_2), torch.tensor(same_person)

@@ -6,15 +6,16 @@ from mtcnn_pytorch.src.get_nets import PNet, RNet, ONet
 from mtcnn_pytorch.src.box_utils import nms, calibrate_box, get_image_boxes, convert_to_square
 from mtcnn_pytorch.src.first_stage import run_first_stage
 from mtcnn_pytorch.src.align_trans import get_reference_facial_points, warp_and_crop_face
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # device = 'cpu'
-# device = torch.device("cpu")
+device = torch.device("cpu")
 
 class MTCNN():
     def __init__(self):
         self.pnet = PNet().to(device)
         self.rnet = RNet().to(device)
         self.onet = ONet().to(device)
+#         self.device = device
         self.pnet.eval()
         self.rnet.eval()
         self.onet.eval()
@@ -86,7 +87,8 @@ class MTCNN():
         for landmark in landmarks:
             facial5points = [[landmark[j],landmark[j+5]] for j in range(5)]
             warped_face = warp_and_crop_face(np.array(img), facial5points, self.refrence, crop_size=crop_size)
-            faces.append(Image.fromarray(warped_face))
+#             faces.append(Image.fromarray(warped_face))
+            faces.append(warped_face)
         # return boxes, faces
         return faces
 

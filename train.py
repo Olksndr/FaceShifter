@@ -217,7 +217,7 @@ class Trainer():
 
         Z_Y_att = self.generator.att_enc(Y)
 
-        Z_Y_id = self.generator.identity_encoder.encode(Y)
+        Z_Y_id = self.encode_identity(Y)
 
         loss_G, losses = self.get_generator_loss(pred_fake_g, Z_att, Z_Y_att,
                                         Z_id, Z_Y_id, Y, X_t, same)
@@ -274,7 +274,7 @@ class Trainer():
         if not self.resume:
             self.step = 0
             self.step_test = 0
-#         self.generator.train()
+        self.generator.train()
         self.discriminator.train()
         while True:
             start_time = time.time()
