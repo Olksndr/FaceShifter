@@ -40,7 +40,7 @@ def load_checkpoint(generator, discriminator, opt_g, opt_d):
 
 
 def log_metrics(writer, losses, step, mode):
-    writer.add_scalar("{}/adversarial_loss".format(mode), losses["adversarial_loss"], step)
+    writer.add_scalar("{}/adversarial_loss".format(mode), losses["adversarial_loss_g"], step)
     writer.add_scalar("{}/attribute_loss".format(mode), losses["attribute_loss"], step)
     writer.add_scalar("{}/identity_loss".format(mode), losses["identity_loss"], step)
     writer.add_scalar("{}/reconstruction_loss".format(mode), losses["reconstruction_loss"], step)

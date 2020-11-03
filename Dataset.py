@@ -1,5 +1,4 @@
 import csv
-
 import json
 
 import io
@@ -7,33 +6,21 @@ import boto3
 
 from PIL import Image
 
-import sys
-sys.path.append('InsightFace_Pytorch/')
-from mtcnn import MTCNN
-
 from itertools import chain, count
 import numpy as np
 import random
 
 import torch
-from torch.utils.data import Dataset, IterableDataset, DataLoader
+from torch.utils.data import IterableDataset
 from torchvision import transforms
-
-# mtcnn = MTCNN()
-
-# def align_and_crop(pil_img):
-#     faces = mtcnn.align_multi(pil_img, min_face_size=64, crop_size=(256, 256))
-#     if not faces or len(faces) > 1:
-#         return False
-
-#     return faces
 
 class FaceDataset(IterableDataset):
 
     same_prob = 0.8
     
-    def __init__(self, batch_size, keys_file="meta/test_keys.csv"):
+    def __init__(self, mtcnn, batch_size, keys_file="meta/test_keys.csv"):
         super(FaceDataset, self).__init__()
+        self.mtcnn = mtcnn
         self.batch_size = batch_size
         self._get_s3_creds()        
         self.get_keys(keys_file)
@@ -69,13 +56,20 @@ class FaceDataset(IterableDataset):
         while True:
             idx = np.random.choice(self._keys_len)
             yield self.keys[idx]
+            
+    def align_and_crop(self, pil_img):
+        faces = self.mtcnn.align_multi(pil_img, min_face_size=64, crop_size=(256, 256))
+        if not faces or len(faces) > 1:
+            return False
 
+        return faces
     def process_image(self, _):
-        random_key = next(self.random_keys_generator)#[0]
-        print(random_key)
-         
+        random_key = next(self.random_keys_generator)
+
+        img_bytes = io.BytesIO()
+        self.get_s3_client().download_fileobj(self.bucket_name, random_key, img_bytes)
         image = Image.open(img_bytes)
-        image = align_and_crop(image)
+        image = self.align_and_crop(image)
 
         if (not image) or len(image) > 1:
             return self.process_image(None)
@@ -101,3 +95,4 @@ class FaceDataset(IterableDataset):
         image_1, image_2, same_person = [[batch[i][j] for i in range(self.batch_size)] for j in range(3)]
 
         return torch.stack(image_1), torch.stack(image_2), torch.tensor(same_person)
+

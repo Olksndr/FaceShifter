@@ -16,7 +16,7 @@ from InsightFace_Pytorch.model import Backbone
 from model.auxilary_methods import *
 
 from torch.utils.tensorboard import SummaryWriter
-
+from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
 class Trainer():
@@ -30,7 +30,7 @@ class Trainer():
         self.init_optimizers()
         self.build_face_aligner()
         self.build_face_recognizer()
-
+        self.init_datasets()
 
         if resume == False:
             self.generator.apply(init_weights)
@@ -42,7 +42,6 @@ class Trainer():
                 self.opt_g, self.opt_d = load_checkpoint(self.generator,\
                                     self.discriminator, self.opt_g, self.opt_d)
 
-        self.init_datasets()
         self.writer = SummaryWriter("summary/")
 
     def build_face_aligner(self):
@@ -62,11 +61,13 @@ class Trainer():
         return Z_id.unsqueeze(-1).unsqueeze(-1)
 
     def init_datasets(self):
-        train_keys, test_keys = os.path.join("meta", "train_keys.json"), os.path.join("meta", "test_keys.json")
-        self.train_loader = FaceDataset(self.mtcnn, batch_size=self.batch_size,
+        train_keys, test_keys = os.path.join("meta", "train_keys.csv"), os.path.join("meta", "test_keys.csv")
+        train_loader = FaceDataset(self.mtcnn, batch_size=self.batch_size,
                                                 keys_file=train_keys)
-        self.test_loader = FaceDataset(self.mtcnn, batch_size=self.batch_size,
+        self.train_loader = DataLoader(train_loader, batch_size=None, num_workers=4)
+        test_loader = FaceDataset(self.mtcnn, batch_size=self.batch_size,
                                                 keys_file=test_keys)
+        self.test_loader = DataLoader(test_loader, batch_size=None, num_workers=4)
         self.test_loader.same_prob = 0
         print("datasets successfully init")
 
@@ -90,28 +91,28 @@ class Trainer():
         X_t = X_t.to(self.device)
         same = same.to(self.device)
 
-        Z_id = encode_identity(X_S)
-        Y, Z_att = generator([Z_id, X_T])
+        Z_id = self.encode_identity(X_s)
+        Y, Z_att = self.generator([Z_id, X_t])
 
-        fake_discr_scores = discriminator(Y.detach())
-        true_discr_scores = discriminator(X_T)
+        fake_discr_scores = self.discriminator(Y.detach())
+        true_discr_scores = self.discriminator(X_t)
 
         # discriminator step
-        opt_d.zero_grad()
+        self.opt_d.zero_grad()
         loss_d, metrics = get_discriminator_loss(fake_discr_scores, true_discr_scores)
         loss_d.backward()
-        opt_d.step()
+        self.opt_d.step()
 
         # generator step
-        opt_g.zero_grad()
+        self.opt_g.zero_grad()
 
-        fake_discr_scores = discriminator(Y)
-        Z_Y_att = generator.att_enc(Y)
-        Z_Y_id = encode_identity(Y)
+        fake_discr_scores = self.discriminator(Y)
+        Z_Y_att = self.generator.att_enc(Y)
+        Z_Y_id = self.encode_identity(Y)
         loss_g, metrics_g = get_generator_loss(fake_discr_scores, Z_att,
-                                            Z_Y_att, Z_id, Z_Y_id, Y, X_T, same)
+                                            Z_Y_att, Z_id, Z_Y_id, Y, X_t, same)
         loss_g.backward()
-        opt_g.step()
+        self.opt_g.step()
 
         metrics.update(metrics_g)
         return Y, metrics
@@ -126,15 +127,16 @@ class Trainer():
         with torch.no_grad():
             Z_id = self.encode_identity(X_s)
             Y, Z_att = self.generator([Z_id, X_t])
-            fake_discr_scores = discriminator(Y.detach())
-            true_discr_scores = discriminator(X_T)
-            loss_d, metrics = get_discriminator_loss(fake_discr_scores, true_discr_scores)
-            fake_discr_scores = discriminator(Y)
-            Z_Y_att = generator.att_enc(Y)
-            Z_Y_id = encode_identity(Y)
+            fake_discr_scores = self.discriminator(Y.detach())
+            true_discr_scores = self.discriminator(X_t)
+            loss_d, metrics = self.get_discriminator_loss(fake_discr_scores, true_discr_scores)
+            fake_discr_scores = self.discriminator(Y)
+            Z_Y_att = self.generator.att_enc(Y)
+            Z_Y_id = self.encode_identity(Y)
             loss_g, metrics_g = get_generator_loss(fake_discr_scores, Z_att,
-                                            Z_Y_att, Z_id, Z_Y_id, Y, X_T, same)
+                                            Z_Y_att, Z_id, Z_Y_id, Y, X_t, same)
             metrics.update(metrics_g)
+            pytorch.cuda.empty_cache()
         return Y, metrics
 
     def train(self):
@@ -142,40 +144,47 @@ class Trainer():
         self.generator.train()
         self.discriminator.train()
 
-        while True:
+        for train_batch in self.train_loader:
             start_time = time.time()
-            train_batch = next(self.train_loader)
+            print("on batch begin")
+#             train_batch = next(self.train_loader)
+            
             Y, metrics = self.train_step(train_batch, self.step)
-            log_metrics(self.writer, metrics, self.train_step, 'train')
+#             log_metrics(self.writer, metrics, self.step, 'train')
             print("train_step: {}, elapsed_time: {:.5}".format(self.step,
                                                     time.time() - start_time))
+            
+#             if self.step % 100 == 0 and self.step != 0:
+#                 images = [train_batch[0].to(self.device),
+#                             train_batch[1].to(self.device), Y.detach()]
+#                 perform_visualization(self.batch_size, images, self.step)
+            del train_batch
 
-            if self.step % 100 == 0 and self.step != 0:
-                images = [train_batch[0].to(self.device),
-                            train_batch[1].to(self.device), Y.detach()]
-                perform_visualization(self.batch_size, images, self.step)
+#             if self.step % 1000 == 0 and self.step != 0:
 
-
-            if self.step % 1000 == 0 and self.step != 0:
-
-                # del train_batch
-
-                for i in range(100):
-                    start_time = time.time()
-                    test_batch = next(self.test_loader)
-                    Y, metrics = self.test_step(test_batch, self.step_test)
-                    log_metrics(self.writer, metrics, self.step_test, 'test')
-                    print("test_step: {}, elapsed_time: {:.5}".format(\
-                                self.step_test, time.time() - start_time))
-                    if i % 10 == 0:
-                        images = [test_batch[0].to(self.device),
-                                        test_batch[1].to(self.device), Y]
-                        perform_visualization(self.batch_size, images,
-                                                    self.step, self.step_test)
-                    self.step_test += 1
-                save_checkpoint(self.step, self.step_test, self.generator,
-                                    self.opt_g, self.discriminator, self.opt_d)
+#                 # del train_batch
+#                 i = 0
+#                 for test_batch in self.test_loader:
+# #                 for i in range(100):
+#                     start_time = time.time()
+# #                     test_batch = next(self.test_loader)
+#                     Y, metrics = self.test_step(test_batch, self.step_test)
+#                     log_metrics(self.writer, metrics, self.step_test, 'test')
+        
+#                     print("test_step: {}, elapsed_time: {:.5}".format(\
+#                                 self.step_test, time.time() - start_time))
+#                     if i % 10 == 0:
+#                         images = [test_batch[0].to(self.device),
+#                                         test_batch[1].to(self.device), Y]
+#                         perform_visualization(self.batch_size, images,
+#                                                     self.step, self.step_test)
+#                     self.step_test += 1
+#                     i += 1
+#                     if i % 100 == 0:
+#                         break
+#                 save_checkpoint(self.step, self.step_test, self.generator,
+#                                     self.opt_g, self.discriminator, self.opt_d)
             self.step += 1
 
 # if __name__ == "__main__":
-trainer = Trainer(resume=False, batch_size=8)
+# trainer = Trainer(resume=False, batch_size=8)
